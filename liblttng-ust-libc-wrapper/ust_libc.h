@@ -84,6 +84,52 @@ TRACEPOINT_EVENT(lttng_ust_libc, posix_memalign,
 	)
 )
 
+TRACEPOINT_EVENT(lttng_ust_libc, open,
+	TP_ARGS(const char *, path, int, oflag, int, mode, void *, ip),
+	TP_FIELDS(
+		ctf_string(path, path)
+		ctf_integer(int, oflag, oflag)
+		ctf_integer(int, mode, mode)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, openat,
+	TP_ARGS(int, fd, const char *, path, int, oflag, int, mode, void *, ip),
+	TP_FIELDS(
+		ctf_integer(int, fd, fd)
+		ctf_string(path, path)
+		ctf_integer(int, oflag, oflag)
+		ctf_integer(int, mode, mode)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, open64,
+	TP_ARGS(const char *, path, int, oflag, int, mode, void *, ip),
+	TP_FIELDS(
+		ctf_string(path, path)
+		ctf_integer(int, oflag, oflag)
+		ctf_integer(int, mode, mode)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, openat64,
+	TP_ARGS(int, fd, const char *, path, int, oflag, int, mode, void *, ip),
+	TP_FIELDS(
+		ctf_integer(int, fd, fd)
+		ctf_string(path, path)
+		ctf_integer(int, oflag, oflag)
+		ctf_integer(int, mode, mode)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, fopen,
+	TP_ARGS(const char *, filename, const char *, mode, void *, ip),
+	TP_FIELDS(
+		ctf_string(filename, filename)
+		ctf_string(mode, mode)
+	)
+)
+
 #endif /* _TRACEPOINT_UST_LIBC_H */
 
 #undef TRACEPOINT_INCLUDE

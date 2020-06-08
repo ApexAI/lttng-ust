@@ -25,7 +25,9 @@
  */
 #include <lttng/ust-dlfcn.h>
 #include <sys/types.h>
+#include <stdarg.h>
 #include <stdio.h>
+#include <fcntl.h>
 #include <assert.h>
 #include <urcu/system.h>
 #include <urcu/uatomic.h>
@@ -440,4 +442,203 @@ void lttng_ust_malloc_wrapper_init(void)
 	 * multithreaded.
 	 */
 	lookup_all_symbols();
+}
+
+/*
+ * Additions to libc-wrapper
+ *
+ * TODO(christophe.bedard) extract to separate file
+ */
+
+int static_open(const char * path, int oflag, ...)
+{
+	printf("static_open called with path: %s\n", path);
+	return 0;
+}
+
+int static_openat(int fd, const char * path, int oflag, ...)
+{
+	printf("static_openat called with path: %s\n", path);
+	return 0;
+}
+
+FILE * static_fopen(const char * filename, const char * mode)
+{
+	printf("static_fopen called with filename: %s\n", filename);
+	return NULL;
+}
+
+struct syscall_functions {
+	int (*open)(const char * path, int oflag, ...);
+	int (*openat)(int fd, const char * path, int oflag, ...);
+	int (*open64)(const char * path, int oflag, ...);
+	int (*openat64)(int fd, const char * path, int oflag, ...);
+	FILE * (*fopen)(const char * filename, const char * mode);
+};
+
+static
+struct syscall_functions cur_syscall;
+
+static
+void setup_static_sycalls(void)
+{
+	assert(NULL == cur_syscall.open);
+	cur_syscall.open = static_open;
+	assert(NULL == cur_syscall.open64);
+	cur_syscall.open64 = static_open;
+	assert(NULL == cur_syscall.openat);
+	cur_syscall.openat = static_openat;
+	assert(NULL == cur_syscall.openat64);
+	cur_syscall.openat64 = static_openat;
+	assert(NULL == cur_syscall.fopen);
+	cur_syscall.fopen = static_fopen;
+}
+
+static
+void lookup_all_syscall_symbols(void)
+{
+	struct syscall_functions sf;
+
+	/*
+	 * Temporarily redirect syscall functions
+	 * until the dlsym lookup has completed.
+	 */
+	setup_static_sycalls();
+
+	/* Perform the actual lookups */
+	sf.open = dlsym(RTLD_NEXT, "open");
+	sf.open64 = dlsym(RTLD_NEXT, "open64");
+	sf.openat = dlsym(RTLD_NEXT, "openat");
+	sf.openat64 = dlsym(RTLD_NEXT, "openat64");
+	sf.fopen = dlsym(RTLD_NEXT, "fopen");
+
+	/* Populate the new allocator functions */
+	memcpy(&cur_syscall, &sf, sizeof(cur_syscall));
+}
+
+int open(const char * path, int oflag, ...)
+{
+	int retval;
+
+	if (NULL == cur_syscall.open) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.open) {
+			fprintf(stderr, "open: unable to find open\n");
+			abort();
+		}
+	}
+
+	mode_t mode = 0;
+	if (__OPEN_NEEDS_MODE(oflag)) {
+		va_list arg;
+		va_start(arg, oflag);
+		mode = va_arg(arg, mode_t);
+		va_end(arg);
+	}
+	retval = cur_syscall.open(path, oflag, mode);
+	tracepoint(lttng_ust_libc, open, path, oflag, mode, LTTNG_UST_CALLER_IP());
+	return retval;
+}
+
+int open64(const char * path, int oflag, ...)
+{
+	int retval;
+
+	if (NULL == cur_syscall.open64) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.open64) {
+			fprintf(stderr, "open64: unable to find open64\n");
+			abort();
+		}
+	}
+
+	mode_t mode = 0;
+	if (__OPEN_NEEDS_MODE(oflag)) {
+		va_list arg;
+		va_start(arg, oflag);
+		mode = va_arg(arg, mode_t);
+		va_end(arg);
+	}
+	retval = cur_syscall.open64(path, oflag, mode);
+	tracepoint(lttng_ust_libc, open64, path, oflag, mode, LTTNG_UST_CALLER_IP());
+	return retval;
+}
+
+int openat(int fd, const char * path, int oflag, ...)
+{
+	int retval;
+
+	if (NULL == cur_syscall.openat) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.openat) {
+			fprintf(stderr, "openat: unable to find openat\n");
+			abort();
+		}
+	}
+
+	mode_t mode = 0;
+	if (__OPEN_NEEDS_MODE(oflag)) {
+		va_list arg;
+		va_start(arg, oflag);
+		mode = va_arg(arg, mode_t);
+		va_end(arg);
+	}
+	retval = cur_syscall.openat(fd, path, oflag, mode);
+	tracepoint(lttng_ust_libc, openat, fd, path, oflag, mode, LTTNG_UST_CALLER_IP());
+	return retval;
+}
+
+int openat64(int fd, const char * path, int oflag, ...)
+{
+	int retval;
+
+	if (NULL == cur_syscall.openat64) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.openat64) {
+			fprintf(stderr, "openat64: unable to find openat64\n");
+			abort();
+		}
+	}
+
+	mode_t mode = 0;
+	if (__OPEN_NEEDS_MODE(oflag)) {
+		va_list arg;
+		va_start(arg, oflag);
+		mode = va_arg(arg, mode_t);
+		va_end(arg);
+	}
+	retval = cur_syscall.openat64(fd, path, oflag, mode);
+	tracepoint(lttng_ust_libc, openat64, fd, path, oflag, mode, LTTNG_UST_CALLER_IP());
+	return retval;
+}
+
+FILE * fopen(const char * filename, const char * mode)
+{
+	FILE * ret;
+
+	if (NULL == cur_syscall.fopen) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.fopen) {
+			fprintf(stderr, "fopen: unable to find fopen\n");
+			abort();
+		}
+	}
+
+	ret = cur_syscall.fopen(filename, mode);
+	tracepoint(lttng_ust_libc, fopen, filename, mode, LTTNG_UST_CALLER_IP());
+	return ret;
+}
+
+__attribute__((constructor))
+void lttng_ust_libc_wrapper_init(void)
+{
+	/* Initialization already done */
+	if (cur_syscall.open) {
+		return;
+	}
+	/*
+	 * Ensure the it is in place before the process becomes
+	 * multithreaded.
+	 */
+	lookup_all_syscall_symbols();
 }

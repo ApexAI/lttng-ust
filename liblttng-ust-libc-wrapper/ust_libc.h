@@ -84,49 +84,260 @@ TRACEPOINT_EVENT(lttng_ust_libc, posix_memalign,
 	)
 )
 
-TRACEPOINT_EVENT(lttng_ust_libc, open,
-	TP_ARGS(const char *, path, int, oflag, int, mode, void *, ip),
+TRACEPOINT_EVENT(lttng_ust_libc, accept,
+	TP_ARGS(int, fd, void *, addr_ptr, void *, addr_len_ptr, int, result, void *, ip),
 	TP_FIELDS(
-		ctf_string(path, path)
-		ctf_integer(int, oflag, oflag)
-		ctf_integer(int, mode, mode)
+		ctf_integer(int, fd, fd)
+		ctf_integer_hex(void *, addr_ptr, addr_ptr)
+		ctf_integer_hex(void *, addr_len_ptr, addr_len_ptr)
+		ctf_integer(int, result, result)
 	)
 )
 
-TRACEPOINT_EVENT(lttng_ust_libc, openat,
-	TP_ARGS(int, fd, const char *, path, int, oflag, int, mode, void *, ip),
+TRACEPOINT_EVENT(lttng_ust_libc, accept4,
+	TP_ARGS(int, fd, void *, addr_ptr, void *, addr_len_ptr, int, flags, int, result, void *, ip),
 	TP_FIELDS(
 		ctf_integer(int, fd, fd)
+		ctf_integer_hex(void *, addr_ptr, addr_ptr)
+		ctf_integer_hex(void *, addr_len_ptr, addr_len_ptr)
+		ctf_integer(int, flags, flags)
+		ctf_integer(int, result, result)
+	)
+)
+
+// TODO add fclose
+TRACEPOINT_EVENT(lttng_ust_libc, close,
+	TP_ARGS(int, fd, int, result, void *, ip),
+	TP_FIELDS(
+		ctf_integer(int, fd, fd)
+		ctf_integer(int, result, result)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, open,
+	TP_ARGS(const char *, path, int, oflag, int, mode, int, result, void *, ip),
+	TP_FIELDS(
 		ctf_string(path, path)
 		ctf_integer(int, oflag, oflag)
 		ctf_integer(int, mode, mode)
+		ctf_integer(int, result, result)
 	)
 )
 
 TRACEPOINT_EVENT(lttng_ust_libc, open64,
-	TP_ARGS(const char *, path, int, oflag, int, mode, void *, ip),
+	TP_ARGS(const char *, path, int, oflag, int, mode, int, result, void *, ip),
 	TP_FIELDS(
 		ctf_string(path, path)
 		ctf_integer(int, oflag, oflag)
 		ctf_integer(int, mode, mode)
+		ctf_integer(int, result, result)
 	)
 )
 
-TRACEPOINT_EVENT(lttng_ust_libc, openat64,
-	TP_ARGS(int, fd, const char *, path, int, oflag, int, mode, void *, ip),
+TRACEPOINT_EVENT(lttng_ust_libc, openat,
+	TP_ARGS(int, fd, const char *, path, int, oflag, int, mode, int, result, void *, ip),
 	TP_FIELDS(
 		ctf_integer(int, fd, fd)
 		ctf_string(path, path)
 		ctf_integer(int, oflag, oflag)
 		ctf_integer(int, mode, mode)
+		ctf_integer(int, result, result)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, openat64,
+	TP_ARGS(int, fd, const char *, path, int, oflag, int, mode, int, result, void *, ip),
+	TP_FIELDS(
+		ctf_integer(int, fd, fd)
+		ctf_string(path, path)
+		ctf_integer(int, oflag, oflag)
+		ctf_integer(int, mode, mode)
+		ctf_integer(int, result, result)
 	)
 )
 
 TRACEPOINT_EVENT(lttng_ust_libc, fopen,
-	TP_ARGS(const char *, filename, const char *, mode, void *, ip),
+	TP_ARGS(const char *, filename, const char *, mode, void *, result, void *, ip),
 	TP_FIELDS(
 		ctf_string(filename, filename)
 		ctf_string(mode, mode)
+		ctf_integer_hex(void *, result, result)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, poll,
+	TP_ARGS(void *, fds_ptr, unsigned long int, nfds, int, timeout, int, result, void *, ip),
+	TP_FIELDS(
+		ctf_integer_hex(void *, fds_ptr, fds_ptr)
+		ctf_integer(unsigned long int, nfds, nfds)
+		ctf_integer(int, timeout, timeout)
+		ctf_integer(int, result, result)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, ppoll,
+	TP_ARGS(void *, fds_ptr, unsigned long int, nfds, const void *, tmo_p_ptr, const void *, sigmask_ptr, int, result, void *, ip),
+	TP_FIELDS(
+		ctf_integer_hex(void *, fds_ptr, fds_ptr)
+		ctf_integer(unsigned long int, nfds, nfds)
+		ctf_integer_hex(const void *, tmo_p_ptr, tmo_p_ptr)
+		ctf_integer_hex(const void *, sigmask_ptr, sigmask_ptr)
+		ctf_integer(int, result, result)
+	)
+)
+
+// TODO add fread
+TRACEPOINT_EVENT(lttng_ust_libc, read,
+	TP_ARGS(int, fd, void *, buf, size_t, count, ssize_t, result, void *, ip),
+	TP_FIELDS(
+		ctf_integer(int, fd, fd)
+		ctf_integer_hex(void *, buf, buf)
+		ctf_integer(size_t, count, count)
+		ctf_integer(ssize_t, result, result)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, pread,
+	TP_ARGS(int, fd, void *, buf, size_t, count, off_t, offset, ssize_t, result, void *, ip),
+	TP_FIELDS(
+		ctf_integer(int, fd, fd)
+		ctf_integer_hex(void *, buf, buf)
+		ctf_integer(size_t, count, count)
+		ctf_integer(off_t, offset, offset)
+		ctf_integer(ssize_t, result, result)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, pread64,
+	TP_ARGS(int, fd, void *, buf, size_t, count, off_t, offset, ssize_t, result, void *, ip),
+	TP_FIELDS(
+		ctf_integer(int, fd, fd)
+		ctf_integer_hex(void *, buf, buf)
+		ctf_integer(size_t, count, count)
+		ctf_integer(off_t, offset, offset)
+		ctf_integer(ssize_t, result, result)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, readv,
+	TP_ARGS(int, fd, const void *, iov_ptr, int, iovcnt, ssize_t, result, void *, ip),
+	TP_FIELDS(
+		ctf_integer(int, fd, fd)
+		ctf_integer_hex(const void *, iov_ptr, iov_ptr)
+		ctf_integer(int, iovcnt, iovcnt)
+		ctf_integer(ssize_t, result, result)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, preadv,
+	TP_ARGS(int, fd, const void *, iov_ptr, int, iovcnt, off_t, offset, ssize_t, result, void *, ip),
+	TP_FIELDS(
+		ctf_integer(int, fd, fd)
+		ctf_integer_hex(const void *, iov_ptr, iov_ptr)
+		ctf_integer(int, iovcnt, iovcnt)
+		ctf_integer(off_t, offset, offset)
+		ctf_integer(ssize_t, result, result)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, preadv64,
+	TP_ARGS(int, fd, const void *, iov_ptr, int, iovcnt, off_t, offset, ssize_t, result, void *, ip),
+	TP_FIELDS(
+		ctf_integer(int, fd, fd)
+		ctf_integer_hex(const void *, iov_ptr, iov_ptr)
+		ctf_integer(int, iovcnt, iovcnt)
+		ctf_integer(off_t, offset, offset)
+		ctf_integer(ssize_t, result, result)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, select,
+	TP_ARGS(int, nfds, void *, readfds_ptr, void *, writefds_ptr, void *, exceptfds_ptr, void *, timeout_ptr, int, result, void *, ip),
+	TP_FIELDS(
+		ctf_integer(int, nfds, nfds)
+		ctf_integer_hex(void *, readfds_ptr, readfds_ptr)
+		ctf_integer_hex(void *, writefds_ptr, writefds_ptr)
+		ctf_integer_hex(void *, exceptfds_ptr, exceptfds_ptr)
+		ctf_integer_hex(void *, timeout_ptr, timeout_ptr)
+		ctf_integer(int, result, result)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, pselect,
+	TP_ARGS(int, nfds, void *, readfds_ptr, void *, writefds_ptr, void *, exceptfds_ptr, const void *, timeout_ptr, const void *, sigmask_ptr, int, result, void *, ip),
+	TP_FIELDS(
+		ctf_integer(int, nfds, nfds)
+		ctf_integer_hex(void *, readfds_ptr, readfds_ptr)
+		ctf_integer_hex(void *, writefds_ptr, writefds_ptr)
+		ctf_integer_hex(void *, exceptfds_ptr, exceptfds_ptr)
+		ctf_integer_hex(const void *, timeout_ptr, timeout_ptr)
+		ctf_integer_hex(const void *, sigmask_ptr, sigmask_ptr)
+		ctf_integer(int, result, result)
+	)
+)
+
+// TODO add fwrite
+TRACEPOINT_EVENT(lttng_ust_libc, write,
+	TP_ARGS(int, fd, const void *, buf, size_t, count, ssize_t, result, void *, ip),
+	TP_FIELDS(
+		ctf_integer(int, fd, fd)
+		ctf_integer_hex(const void *, buf, buf)
+		ctf_integer(size_t, count, count)
+		ctf_integer(ssize_t, result, result)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, pwrite,
+	TP_ARGS(int, fd, const void *, buf, size_t, count, off_t, offset, ssize_t, result, void *, ip),
+	TP_FIELDS(
+		ctf_integer(int, fd, fd)
+		ctf_integer_hex(const void *, buf, buf)
+		ctf_integer(size_t, count, count)
+		ctf_integer(off_t, offset, offset)
+		ctf_integer(ssize_t, result, result)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, pwrite64,
+	TP_ARGS(int, fd, const void *, buf, size_t, count, off_t, offset, ssize_t, result, void *, ip),
+	TP_FIELDS(
+		ctf_integer(int, fd, fd)
+		ctf_integer_hex(const void *, buf, buf)
+		ctf_integer(size_t, count, count)
+		ctf_integer(off_t, offset, offset)
+		ctf_integer(ssize_t, result, result)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, writev,
+	TP_ARGS(int, fd, const void *, iov_ptr, int, iovcnt, ssize_t, result, void *, ip),
+	TP_FIELDS(
+		ctf_integer(int, fd, fd)
+		ctf_integer_hex(const void *, iov_ptr, iov_ptr)
+		ctf_integer(int, iovcnt, iovcnt)
+		ctf_integer(ssize_t, result, result)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, pwritev,
+	TP_ARGS(int, fd, const void *, iov_ptr, int, iovcnt, off_t, offset, ssize_t, result, void *, ip),
+	TP_FIELDS(
+		ctf_integer(int, fd, fd)
+		ctf_integer_hex(const void *, iov_ptr, iov_ptr)
+		ctf_integer(int, iovcnt, iovcnt)
+		ctf_integer(off_t, offset, offset)
+		ctf_integer(ssize_t, result, result)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, pwritev64,
+	TP_ARGS(int, fd, const void *, iov_ptr, int, iovcnt, off_t, offset, ssize_t, result, void *, ip),
+	TP_FIELDS(
+		ctf_integer(int, fd, fd)
+		ctf_integer_hex(const void *, iov_ptr, iov_ptr)
+		ctf_integer(int, iovcnt, iovcnt)
+		ctf_integer(off_t, offset, offset)
+		ctf_integer(ssize_t, result, result)
 	)
 )
 

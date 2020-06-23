@@ -24,7 +24,9 @@
  * libc.
  */
 #include <lttng/ust-dlfcn.h>
+#include <poll.h>
 #include <sys/types.h>
+#include <sys/socket.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <fcntl.h>
@@ -41,6 +43,51 @@
 #define TRACEPOINT_CREATE_PROBES
 #define TP_IP_PARAM ip
 #include "ust_libc.h"
+
+/**
+ * Prevent tracepoints from triggering tracepoints internally,
+ * i.e. from internal calls.
+ */
+static int ust_tp_lock;
+
+static __attribute__((unused))
+void ust_block_spin_lock(pthread_mutex_t *lock)
+{
+	/*
+	 * The memory barrier within cmpxchg takes care of ordering
+	 * memory accesses with respect to the start of the critical
+	 * section.
+	 */
+	while (uatomic_cmpxchg(&ust_tp_lock, 0, 1) != 0)
+		caa_cpu_relax();
+}
+
+static __attribute__((unused))
+void ust_block_spin_unlock(pthread_mutex_t *lock)
+{
+	/*
+	 * Ensure memory accesses within the critical section do not
+	 * leak outside.
+	 */
+	cmm_smp_mb();
+	uatomic_set(&ust_tp_lock, 0);
+}
+
+#define calloc static_calloc
+#define pthread_mutex_lock ust_block_spin_lock
+#define pthread_mutex_unlock ust_block_spin_unlock
+static DEFINE_URCU_TLS(int, tp_nesting);
+#undef pthread_mutex_unlock
+#undef pthread_mutex_lock
+#undef calloc
+
+#define TRACEPOINT_NO_NESTING(func_call, tp_call) \
+	URCU_TLS(tp_nesting)++; \
+	func_call \
+	if (URCU_TLS(tp_nesting) == 1) { \
+		tp_call \
+	} \
+	URCU_TLS(tp_nesting)--;
 
 #define STATIC_CALLOC_LEN 4096
 static char static_calloc_buf[STATIC_CALLOC_LEN];
@@ -267,11 +314,12 @@ void *malloc(size_t size)
 			abort();
 		}
 	}
-	retval = cur_alloc.malloc(size);
-	if (URCU_TLS(malloc_nesting) == 1) {
-		tracepoint(lttng_ust_libc, malloc,
-			size, retval, LTTNG_UST_CALLER_IP());
-	}
+	TRACEPOINT_NO_NESTING(
+		retval = cur_alloc.malloc(size);,
+		if (URCU_TLS(malloc_nesting) == 1) {
+			tracepoint(lttng_ust_libc, malloc,
+				size, retval, LTTNG_UST_CALLER_IP());
+		})
 	URCU_TLS(malloc_nesting)--;
 	return retval;
 }
@@ -288,10 +336,12 @@ void free(void *ptr)
 		goto end;
 	}
 
-	if (URCU_TLS(malloc_nesting) == 1) {
-		tracepoint(lttng_ust_libc, free,
-			ptr, LTTNG_UST_CALLER_IP());
-	}
+	TRACEPOINT_NO_NESTING(
+		;,
+		if (URCU_TLS(malloc_nesting) == 1) {
+			tracepoint(lttng_ust_libc, free,
+				ptr, LTTNG_UST_CALLER_IP());
+		})
 
 	if (cur_alloc.free == NULL) {
 		lookup_all_symbols();
@@ -317,11 +367,12 @@ void *calloc(size_t nmemb, size_t size)
 			abort();
 		}
 	}
-	retval = cur_alloc.calloc(nmemb, size);
-	if (URCU_TLS(malloc_nesting) == 1) {
-		tracepoint(lttng_ust_libc, calloc,
-			nmemb, size, retval, LTTNG_UST_CALLER_IP());
-	}
+	TRACEPOINT_NO_NESTING(
+		retval = cur_alloc.calloc(nmemb, size);,
+		if (URCU_TLS(malloc_nesting) == 1) {
+			tracepoint(lttng_ust_libc, calloc,
+				nmemb, size, retval, LTTNG_UST_CALLER_IP());
+		})
 	URCU_TLS(malloc_nesting)--;
 	return retval;
 }
@@ -371,10 +422,12 @@ void *realloc(void *ptr, size_t size)
 	}
 	retval = cur_alloc.realloc(ptr, size);
 end:
-	if (URCU_TLS(malloc_nesting) == 1) {
-		tracepoint(lttng_ust_libc, realloc,
-			ptr, size, retval, LTTNG_UST_CALLER_IP());
-	}
+	TRACEPOINT_NO_NESTING(
+		;,
+		if (URCU_TLS(malloc_nesting) == 1) {
+			tracepoint(lttng_ust_libc, realloc,
+				ptr, size, retval, LTTNG_UST_CALLER_IP());
+		})
 	URCU_TLS(malloc_nesting)--;
 	return retval;
 }
@@ -391,12 +444,13 @@ void *memalign(size_t alignment, size_t size)
 			abort();
 		}
 	}
-	retval = cur_alloc.memalign(alignment, size);
-	if (URCU_TLS(malloc_nesting) == 1) {
-		tracepoint(lttng_ust_libc, memalign,
-			alignment, size, retval,
-			LTTNG_UST_CALLER_IP());
-	}
+	TRACEPOINT_NO_NESTING(
+		retval = cur_alloc.memalign(alignment, size);,
+		if (URCU_TLS(malloc_nesting) == 1) {
+			tracepoint(lttng_ust_libc, memalign,
+				alignment, size, retval,
+				LTTNG_UST_CALLER_IP());
+		})
 	URCU_TLS(malloc_nesting)--;
 	return retval;
 }
@@ -413,12 +467,13 @@ int posix_memalign(void **memptr, size_t alignment, size_t size)
 			abort();
 		}
 	}
-	retval = cur_alloc.posix_memalign(memptr, alignment, size);
-	if (URCU_TLS(malloc_nesting) == 1) {
-		tracepoint(lttng_ust_libc, posix_memalign,
-			*memptr, alignment, size,
-			retval, LTTNG_UST_CALLER_IP());
-	}
+	TRACEPOINT_NO_NESTING(
+		retval = cur_alloc.posix_memalign(memptr, alignment, size);,
+		if (URCU_TLS(malloc_nesting) == 1) {
+			tracepoint(lttng_ust_libc, posix_memalign,
+				*memptr, alignment, size,
+				retval, LTTNG_UST_CALLER_IP());
+		})
 	URCU_TLS(malloc_nesting)--;
 	return retval;
 }
@@ -448,7 +503,26 @@ void lttng_ust_malloc_wrapper_init(void)
  * Additions to libc-wrapper
  *
  * TODO(christophe.bedard) extract to separate file
+ * TODO(christophe.bedard) remove these static_* functions if not necessary
  */
+
+int static_accept(int fd, __SOCKADDR_ARG addr, socklen_t * addr_len)
+{
+	printf("static_accept called\n");
+	return 0;
+}
+
+int static_accept4(int fd, __SOCKADDR_ARG addr, socklen_t * addr_len, int flags)
+{
+	printf("static_accept4 called\n");
+	return 0;
+}
+
+int static_close(int fd)
+{
+	printf("static_close called\n");
+	return 0;
+}
 
 int static_open(const char * path, int oflag, ...)
 {
@@ -468,12 +542,127 @@ FILE * static_fopen(const char * filename, const char * mode)
 	return NULL;
 }
 
+int static_poll(struct pollfd * fds, nfds_t nfds, int timeout)
+{
+	printf("static_poll called\n");
+	return 0;
+}
+
+int static_ppoll(struct pollfd * fds, nfds_t nfds, const struct timespec * tmo_p, const sigset_t * sigmask)
+{
+	printf("static_ppoll called\n");
+	return 0;
+}
+
+ssize_t static_read(int fd, void * buf, size_t count)
+{
+	printf("static_read called\n");
+	return 0;
+}
+
+ssize_t static_pread(int fd, void * buf, size_t count, off_t offset)
+{
+	printf("static_pread called\n");
+	return 0;
+}
+
+ssize_t static_pread64(int fd, void * buf, size_t count, off_t offset)
+{
+	printf("static_pread64 called\n");
+	return 0;
+}
+
+ssize_t static_readv(int fd, const struct iovec * iov, int iovcnt)
+{
+	printf("static_readv called\n");
+	return 0;
+}
+
+ssize_t static_preadv(int fd, const struct iovec * iov, int iovcnt, off_t offset)
+{
+	printf("static_preadv called\n");
+	return 0;
+}
+
+ssize_t static_preadv64(int fd, const struct iovec * iov, int iovcnt, off_t offset)
+{
+	printf("static_preadv64 called\n");
+	return 0;
+}
+
+int static_select(int nfds, fd_set * readfds, fd_set * writefds, fd_set * exceptfds, struct timeval * timeout)
+{
+	printf("static_select called\n");
+	return 0;
+}
+
+int static_pselect(int nfds, fd_set * readfds, fd_set * writefds, fd_set * exceptfds, const struct timespec * timeout, const sigset_t * sigmask)
+{
+	printf("static_pselect called\n");
+	return 0;
+}
+
+ssize_t static_write(int fd, const void * buf, size_t count)
+{
+	printf("static_write called\n");
+	return 0;
+}
+
+ssize_t static_pwrite(int fd, const void * buf, size_t count, off_t offset)
+{
+	printf("static_pwrite called\n");
+	return 0;
+}
+
+ssize_t static_pwrite64(int fd, const void * buf, size_t count, off_t offset)
+{
+	printf("static_pwrite64 called\n");
+	return 0;
+}
+
+ssize_t static_writev(int fd, const struct iovec * iov, int iovcnt)
+{
+	printf("static_writev called\n");
+	return 0;
+}
+
+ssize_t static_pwritev(int fd, const struct iovec * iov, int iovcnt, off_t offset)
+{
+	printf("static_pwritev called\n");
+	return 0;
+}
+
+ssize_t static_pwritev64(int fd, const struct iovec * iov, int iovcnt, off_t offset)
+{
+	printf("static_pwritev64 called\n");
+	return 0;
+}
+
 struct syscall_functions {
+	int (*accept)(int fd, struct sockaddr * addr, socklen_t * addr_len);
+	int (*accept4)(int fd, struct sockaddr * addr, socklen_t * addr_len, int flags);
+	int (*close)(int fd);
 	int (*open)(const char * path, int oflag, ...);
-	int (*openat)(int fd, const char * path, int oflag, ...);
 	int (*open64)(const char * path, int oflag, ...);
+	int (*openat)(int fd, const char * path, int oflag, ...);
 	int (*openat64)(int fd, const char * path, int oflag, ...);
 	FILE * (*fopen)(const char * filename, const char * mode);
+	int (*poll)(struct pollfd * fds, nfds_t nfds, int timeout);
+	int (*ppoll)(struct pollfd * fds, nfds_t nfds, const struct timespec * tmo_p, const sigset_t * sigmask);
+	ssize_t (*read)(int fd, void * buf, size_t count);
+	ssize_t (*pread)(int fd, void * buf, size_t count, off_t offset);
+	ssize_t (*pread64)(int fd, void * buf, size_t count, off_t offset);
+	ssize_t (*readv)(int fd, const struct iovec * iov, int iovcnt);
+	ssize_t (*preadv)(int fd, const struct iovec * iov, int iovcnt, off_t offset);
+	ssize_t (*preadv64)(int fd, const struct iovec * iov, int iovcnt, off_t offset);
+	int (*select)(int nfds, fd_set * readfds, fd_set * writefds, fd_set * exceptfds, struct timeval * timeout);
+	int (*pselect)(int nfds, fd_set * readfds, fd_set * writefds, fd_set * exceptfds, const struct timespec * timeout, const sigset_t * sigmask);
+	ssize_t (*write)(int fd, const void * buf, size_t count);
+	ssize_t (*pwrite)(int fd, const void * buf, size_t count, off_t offset);
+	ssize_t (*pwrite64)(int fd, const void * buf, size_t count, off_t offset);
+	ssize_t (*writev)(int fd, const struct iovec * iov, int iovcnt);
+	ssize_t (*pwritev)(int fd, const struct iovec * iov, int iovcnt, off_t offset);
+	ssize_t (*pwritev64)(int fd, const struct iovec * iov, int iovcnt, off_t offset);
 };
 
 static
@@ -482,6 +671,12 @@ struct syscall_functions cur_syscall;
 static
 void setup_static_sycalls(void)
 {
+	assert(NULL == cur_syscall.accept);
+	cur_syscall.accept = static_accept;
+	assert(NULL == cur_syscall.accept4);
+	cur_syscall.accept4 = static_accept4;
+	assert(NULL == cur_syscall.close);
+	cur_syscall.close = static_close;
 	assert(NULL == cur_syscall.open);
 	cur_syscall.open = static_open;
 	assert(NULL == cur_syscall.open64);
@@ -492,6 +687,38 @@ void setup_static_sycalls(void)
 	cur_syscall.openat64 = static_openat;
 	assert(NULL == cur_syscall.fopen);
 	cur_syscall.fopen = static_fopen;
+	assert(NULL == cur_syscall.poll);
+	cur_syscall.poll = static_poll;
+	assert(NULL == cur_syscall.ppoll);
+	cur_syscall.ppoll = static_ppoll;
+	assert(NULL == cur_syscall.read);
+	cur_syscall.read = static_read;
+	assert(NULL == cur_syscall.pread);
+	cur_syscall.pread = static_pread;
+	assert(NULL == cur_syscall.pread64);
+	cur_syscall.pread64 = static_pread64;
+	assert(NULL == cur_syscall.readv);
+	cur_syscall.readv = static_readv;
+	assert(NULL == cur_syscall.preadv);
+	cur_syscall.preadv = static_preadv;
+	assert(NULL == cur_syscall.preadv64);
+	cur_syscall.preadv64 = static_preadv64;
+	assert(NULL == cur_syscall.select);
+	cur_syscall.select = static_select;
+	assert(NULL == cur_syscall.pselect);
+	cur_syscall.pselect = static_pselect;
+	assert(NULL == cur_syscall.write);
+	cur_syscall.write = static_write;
+	assert(NULL == cur_syscall.pwrite);
+	cur_syscall.pwrite = static_pwrite;
+	assert(NULL == cur_syscall.pwrite64);
+	cur_syscall.pwrite64 = static_pwrite64;
+	assert(NULL == cur_syscall.writev);
+	cur_syscall.writev = static_writev;
+	assert(NULL == cur_syscall.pwritev);
+	cur_syscall.pwritev = static_pwritev;
+	assert(NULL == cur_syscall.pwritev64);
+	cur_syscall.pwritev64 = static_pwritev64;
 }
 
 static
@@ -506,14 +733,89 @@ void lookup_all_syscall_symbols(void)
 	setup_static_sycalls();
 
 	/* Perform the actual lookups */
+
+	sf.accept = dlsym(RTLD_NEXT, "accept");
+	sf.accept4 = dlsym(RTLD_NEXT, "accept4");
+	sf.close = dlsym(RTLD_NEXT, "close");
 	sf.open = dlsym(RTLD_NEXT, "open");
 	sf.open64 = dlsym(RTLD_NEXT, "open64");
 	sf.openat = dlsym(RTLD_NEXT, "openat");
 	sf.openat64 = dlsym(RTLD_NEXT, "openat64");
 	sf.fopen = dlsym(RTLD_NEXT, "fopen");
+	sf.poll = dlsym(RTLD_NEXT, "poll");
+	sf.ppoll = dlsym(RTLD_NEXT, "ppoll");
+	sf.read = dlsym(RTLD_NEXT, "read");
+	sf.pread = dlsym(RTLD_NEXT, "pread");
+	sf.pread64 = dlsym(RTLD_NEXT, "pread64");
+	sf.readv = dlsym(RTLD_NEXT, "readv");
+	sf.preadv = dlsym(RTLD_NEXT, "preadv");
+	sf.preadv64 = dlsym(RTLD_NEXT, "preadv64");
+	sf.select = dlsym(RTLD_NEXT, "select");
+	sf.pselect = dlsym(RTLD_NEXT, "pselect");
+	sf.write = dlsym(RTLD_NEXT, "write");
+	sf.pwrite = dlsym(RTLD_NEXT, "pwrite");
+	sf.pwrite64 = dlsym(RTLD_NEXT, "pwrite64");
+	sf.writev = dlsym(RTLD_NEXT, "writev");
+	sf.pwritev = dlsym(RTLD_NEXT, "pwritev");
+	sf.pwritev64 = dlsym(RTLD_NEXT, "pwritev64");
 
 	/* Populate the new allocator functions */
 	memcpy(&cur_syscall, &sf, sizeof(cur_syscall));
+}
+
+
+int accept(int fd, struct sockaddr * addr, socklen_t * addr_len)
+{
+	int retval;
+
+	if (NULL == cur_syscall.accept) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.accept) {
+			fprintf(stderr, "accept: unable to find accept\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.accept(fd, addr, addr_len);,
+		tracepoint(lttng_ust_libc, accept, fd, addr, addr_len, retval, LTTNG_UST_CALLER_IP());)
+	return retval;
+}
+
+int accept4(int fd, struct sockaddr * addr, socklen_t * addr_len, int flags)
+{
+	int retval;
+
+	if (NULL == cur_syscall.accept4) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.accept4) {
+			fprintf(stderr, "accept4: unable to find accept4\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.accept4(fd, addr, addr_len, flags);,
+		tracepoint(lttng_ust_libc, accept4, fd, addr, addr_len, flags, retval, LTTNG_UST_CALLER_IP());)
+	return retval;
+}
+
+int close(int fd)
+{
+	int retval;
+
+	if (NULL == cur_syscall.close) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.close) {
+			fprintf(stderr, "close: unable to find close\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.close(fd);,
+		tracepoint(lttng_ust_libc, close, fd, retval, LTTNG_UST_CALLER_IP());)
+	return retval;
 }
 
 int open(const char * path, int oflag, ...)
@@ -535,8 +837,9 @@ int open(const char * path, int oflag, ...)
 		mode = va_arg(arg, mode_t);
 		va_end(arg);
 	}
-	retval = cur_syscall.open(path, oflag, mode);
-	tracepoint(lttng_ust_libc, open, path, oflag, mode, LTTNG_UST_CALLER_IP());
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.open(path, oflag, mode);,
+		tracepoint(lttng_ust_libc, open, path, oflag, mode, retval, LTTNG_UST_CALLER_IP());)
 	return retval;
 }
 
@@ -559,8 +862,9 @@ int open64(const char * path, int oflag, ...)
 		mode = va_arg(arg, mode_t);
 		va_end(arg);
 	}
-	retval = cur_syscall.open64(path, oflag, mode);
-	tracepoint(lttng_ust_libc, open64, path, oflag, mode, LTTNG_UST_CALLER_IP());
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.open64(path, oflag, mode);,
+		tracepoint(lttng_ust_libc, open64, path, oflag, mode, retval, LTTNG_UST_CALLER_IP());)
 	return retval;
 }
 
@@ -583,8 +887,9 @@ int openat(int fd, const char * path, int oflag, ...)
 		mode = va_arg(arg, mode_t);
 		va_end(arg);
 	}
-	retval = cur_syscall.openat(fd, path, oflag, mode);
-	tracepoint(lttng_ust_libc, openat, fd, path, oflag, mode, LTTNG_UST_CALLER_IP());
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.openat(fd, path, oflag, mode);,
+		tracepoint(lttng_ust_libc, openat, fd, path, oflag, mode, retval, LTTNG_UST_CALLER_IP());)
 	return retval;
 }
 
@@ -607,8 +912,9 @@ int openat64(int fd, const char * path, int oflag, ...)
 		mode = va_arg(arg, mode_t);
 		va_end(arg);
 	}
-	retval = cur_syscall.openat64(fd, path, oflag, mode);
-	tracepoint(lttng_ust_libc, openat64, fd, path, oflag, mode, LTTNG_UST_CALLER_IP());
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.openat64(fd, path, oflag, mode);,
+		tracepoint(lttng_ust_libc, openat64, fd, path, oflag, mode, retval, LTTNG_UST_CALLER_IP());)
 	return retval;
 }
 
@@ -624,9 +930,304 @@ FILE * fopen(const char * filename, const char * mode)
 		}
 	}
 
-	ret = cur_syscall.fopen(filename, mode);
-	tracepoint(lttng_ust_libc, fopen, filename, mode, LTTNG_UST_CALLER_IP());
+	TRACEPOINT_NO_NESTING(
+		ret = cur_syscall.fopen(filename, mode);,
+		tracepoint(lttng_ust_libc, fopen, filename, mode, ret, LTTNG_UST_CALLER_IP());)
 	return ret;
+}
+
+int poll(struct pollfd * fds, nfds_t nfds, int timeout)
+{
+	int retval;
+
+	if (NULL == cur_syscall.poll) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.poll) {
+			fprintf(stderr, "poll: unable to find poll\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.poll(fds, nfds, timeout);,
+		tracepoint(lttng_ust_libc, poll, fds, nfds, timeout, retval, LTTNG_UST_CALLER_IP());)
+	return retval;
+}
+
+int ppoll(struct pollfd * fds, nfds_t nfds, const struct timespec * tmo_p, const sigset_t * sigmask)
+{
+	int retval;
+
+	if (NULL == cur_syscall.ppoll) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.ppoll) {
+			fprintf(stderr, "ppoll: unable to find ppoll\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.ppoll(fds, nfds, tmo_p, sigmask);,
+		tracepoint(lttng_ust_libc, ppoll, fds, nfds, tmo_p, sigmask, retval, LTTNG_UST_CALLER_IP());)
+	return retval;
+}
+
+ssize_t read(int fd, void * buf, size_t count)
+{
+	int retval;
+
+	if (NULL == cur_syscall.read) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.read) {
+			fprintf(stderr, "read: unable to find read\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.read(fd, buf, count);,
+		tracepoint(lttng_ust_libc, read, fd, buf, count, retval, LTTNG_UST_CALLER_IP());)
+	return retval;
+}
+
+ssize_t pread(int fd, void * buf, size_t count, off_t offset)
+{
+	int retval;
+
+	if (NULL == cur_syscall.pread) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.pread) {
+			fprintf(stderr, "pread: unable to find pread\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.pread(fd, buf, count, offset);,
+		tracepoint(lttng_ust_libc, pread, fd, buf, count, offset, retval, LTTNG_UST_CALLER_IP());)
+	return retval;
+}
+
+ssize_t pread64(int fd, void * buf, size_t count, off_t offset)
+{
+	int retval;
+
+	if (NULL == cur_syscall.pread64) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.pread64) {
+			fprintf(stderr, "pread64: unable to find pread64\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.pread64(fd, buf, count, offset);,
+		tracepoint(lttng_ust_libc, pread64, fd, buf, count, offset, retval, LTTNG_UST_CALLER_IP());)
+	return retval;
+}
+
+ssize_t readv(int fd, const struct iovec * iov, int iovcnt)
+{
+	int retval;
+
+	if (NULL == cur_syscall.readv) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.readv) {
+			fprintf(stderr, "readv: unable to find readv\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.readv(fd, iov, iovcnt);,
+		tracepoint(lttng_ust_libc, readv, fd, iov, iovcnt, retval, LTTNG_UST_CALLER_IP());)
+	return retval;
+}
+
+ssize_t preadv(int fd, const struct iovec * iov, int iovcnt, off_t offset)
+{
+	int retval;
+
+	if (NULL == cur_syscall.preadv) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.preadv) {
+			fprintf(stderr, "preadv: unable to find preadv\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.preadv(fd, iov, iovcnt, offset);,
+		tracepoint(lttng_ust_libc, preadv, fd, iov, iovcnt, offset, retval, LTTNG_UST_CALLER_IP());)
+	return retval;
+}
+
+ssize_t preadv64(int fd, const struct iovec * iov, int iovcnt, off_t offset)
+{
+	int retval;
+
+	if (NULL == cur_syscall.preadv64) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.preadv64) {
+			fprintf(stderr, "preadv64: unable to find preadv64\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.preadv64(fd, iov, iovcnt, offset);,
+		tracepoint(lttng_ust_libc, preadv64, fd, iov, iovcnt, offset, retval, LTTNG_UST_CALLER_IP());)
+	return retval;
+}
+
+int select(int nfds, fd_set * readfds, fd_set * writefds, fd_set * exceptfds, struct timeval * timeout)
+{
+	int retval;
+
+	if (NULL == cur_syscall.select) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.select) {
+			fprintf(stderr, "select: unable to find select\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.select(nfds, readfds, writefds, exceptfds, timeout);,
+		tracepoint(lttng_ust_libc, select, nfds, readfds, writefds, exceptfds, timeout, retval, LTTNG_UST_CALLER_IP());)
+	return retval;
+}
+
+int pselect(int nfds, fd_set * readfds, fd_set * writefds, fd_set * exceptfds, const struct timespec * timeout, const sigset_t * sigmask)
+{
+	int retval;
+
+	if (NULL == cur_syscall.pselect) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.pselect) {
+			fprintf(stderr, "pselect: unable to find pselect\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.pselect(nfds, readfds, writefds, exceptfds, timeout, sigmask);,
+		tracepoint(lttng_ust_libc, pselect, nfds, readfds, writefds, exceptfds, timeout, sigmask, retval, LTTNG_UST_CALLER_IP());)
+	return retval;
+}
+
+ssize_t write(int fd, const void * buf, size_t count)
+{
+	int retval;
+
+	if (NULL == cur_syscall.write) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.write) {
+			fprintf(stderr, "write: unable to find write\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.write(fd, buf, count);,
+		tracepoint(lttng_ust_libc, write, fd, buf, count, retval, LTTNG_UST_CALLER_IP());)
+	return retval;
+}
+
+ssize_t pwrite(int fd, const void * buf, size_t count, off_t offset)
+{
+	int retval;
+
+	if (NULL == cur_syscall.pwrite) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.pwrite) {
+			fprintf(stderr, "pwrite: unable to find pwrite\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.pwrite(fd, buf, count, offset);,
+		tracepoint(lttng_ust_libc, pwrite, fd, buf, count, offset, retval, LTTNG_UST_CALLER_IP());)
+	return retval;
+}
+
+ssize_t pwrite64(int fd, const void * buf, size_t count, off_t offset)
+{
+	int retval;
+
+	if (NULL == cur_syscall.pwrite64) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.pwrite64) {
+			fprintf(stderr, "pwrite64: unable to find pwrite64\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.pwrite64(fd, buf, count, offset);,
+		tracepoint(lttng_ust_libc, pwrite64, fd, buf, count, offset, retval, LTTNG_UST_CALLER_IP());)
+	return retval;
+}
+
+ssize_t writev(int fd, const struct iovec * iov, int iovcnt)
+{
+	int retval;
+
+	if (NULL == cur_syscall.writev) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.writev) {
+			fprintf(stderr, "writev: unable to find writev\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.writev(fd, iov, iovcnt);,
+		tracepoint(lttng_ust_libc, writev, fd, iov, iovcnt, retval, LTTNG_UST_CALLER_IP());)
+	return retval;
+}
+
+ssize_t pwritev(int fd, const struct iovec * iov, int iovcnt, off_t offset)
+{
+	int retval;
+
+	if (NULL == cur_syscall.pwritev) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.pwritev) {
+			fprintf(stderr, "pwritev: unable to find pwritev\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.pwritev(fd, iov, iovcnt, offset);,
+		tracepoint(lttng_ust_libc, pwritev, fd, iov, iovcnt, offset, retval, LTTNG_UST_CALLER_IP());)
+	return retval;
+}
+
+ssize_t pwritev64(int fd, const struct iovec * iov, int iovcnt, off_t offset)
+{
+	int retval;
+
+	if (NULL == cur_syscall.pwritev64) {
+		lookup_all_syscall_symbols();
+		if (NULL == cur_syscall.pwritev64) {
+			fprintf(stderr, "pwritev64: unable to find pwritev64\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING(
+		retval = cur_syscall.pwritev64(fd, iov, iovcnt, offset);,
+		tracepoint(lttng_ust_libc, pwritev64, fd, iov, iovcnt, offset, retval, LTTNG_UST_CALLER_IP());)
+	return retval;
+}
+
+static
+void lttng_ust_fixup_tp_nesting_tls(void)
+{
+	asm volatile ("" : : "m" (URCU_TLS(tp_nesting)));
 }
 
 __attribute__((constructor))
@@ -636,6 +1237,7 @@ void lttng_ust_libc_wrapper_init(void)
 	if (cur_syscall.open) {
 		return;
 	}
+	lttng_ust_fixup_tp_nesting_tls();
 	/*
 	 * Ensure the it is in place before the process becomes
 	 * multithreaded.

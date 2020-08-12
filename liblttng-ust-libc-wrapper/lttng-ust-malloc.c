@@ -81,13 +81,34 @@ static DEFINE_URCU_TLS(int, tp_nesting);
 #undef pthread_mutex_lock
 #undef calloc
 
-#define TRACEPOINT_NO_NESTING(func_call, tp_call) \
-	URCU_TLS(tp_nesting)++; \
-	func_call \
-	if (URCU_TLS(tp_nesting) == 1) { \
-		tp_call \
-	} \
+int nesting_guard_is_thread_in_trace()
+{
+	return URCU_TLS(tp_nesting) > 0;
+}
+
+void nesting_guard_set_thread_in_trace()
+{
+	URCU_TLS(tp_nesting)++;
+}
+
+void nesting_guard_reset_thread_in_trace()
+{
 	URCU_TLS(tp_nesting)--;
+}
+
+#define TRACEPOINT_NO_NESTING_(tracepoint_before, func_call, tracepoint_after) \
+	if (nesting_guard_is_thread_in_trace()) { \
+		func_call; \
+	} else { \
+		nesting_guard_set_thread_in_trace(); \
+		tracepoint_before; \
+		func_call; \
+		tracepoint_after; \
+		nesting_guard_reset_thread_in_trace(); \
+	}
+
+#define TRACEPOINT_NO_NESTING(func_call, tracepoint_after) \
+	TRACEPOINT_NO_NESTING_(, func_call, tracepoint_after)
 
 #define STATIC_CALLOC_LEN 4096
 static char static_calloc_buf[STATIC_CALLOC_LEN];
@@ -315,11 +336,11 @@ void *malloc(size_t size)
 		}
 	}
 	TRACEPOINT_NO_NESTING(
-		retval = cur_alloc.malloc(size);,
+		retval = cur_alloc.malloc(size),
 		if (URCU_TLS(malloc_nesting) == 1) {
 			tracepoint(lttng_ust_libc, malloc,
 				size, retval, LTTNG_UST_CALLER_IP());
-		})
+		});
 	URCU_TLS(malloc_nesting)--;
 	return retval;
 }
@@ -337,11 +358,11 @@ void free(void *ptr)
 	}
 
 	TRACEPOINT_NO_NESTING(
-		;,
+		,
 		if (URCU_TLS(malloc_nesting) == 1) {
 			tracepoint(lttng_ust_libc, free,
 				ptr, LTTNG_UST_CALLER_IP());
-		})
+		});
 
 	if (cur_alloc.free == NULL) {
 		lookup_all_symbols();
@@ -368,11 +389,11 @@ void *calloc(size_t nmemb, size_t size)
 		}
 	}
 	TRACEPOINT_NO_NESTING(
-		retval = cur_alloc.calloc(nmemb, size);,
+		retval = cur_alloc.calloc(nmemb, size),
 		if (URCU_TLS(malloc_nesting) == 1) {
 			tracepoint(lttng_ust_libc, calloc,
 				nmemb, size, retval, LTTNG_UST_CALLER_IP());
-		})
+		});
 	URCU_TLS(malloc_nesting)--;
 	return retval;
 }
@@ -423,11 +444,11 @@ void *realloc(void *ptr, size_t size)
 	retval = cur_alloc.realloc(ptr, size);
 end:
 	TRACEPOINT_NO_NESTING(
-		;,
+		,
 		if (URCU_TLS(malloc_nesting) == 1) {
 			tracepoint(lttng_ust_libc, realloc,
 				ptr, size, retval, LTTNG_UST_CALLER_IP());
-		})
+		});
 	URCU_TLS(malloc_nesting)--;
 	return retval;
 }
@@ -445,12 +466,12 @@ void *memalign(size_t alignment, size_t size)
 		}
 	}
 	TRACEPOINT_NO_NESTING(
-		retval = cur_alloc.memalign(alignment, size);,
+		retval = cur_alloc.memalign(alignment, size),
 		if (URCU_TLS(malloc_nesting) == 1) {
 			tracepoint(lttng_ust_libc, memalign,
 				alignment, size, retval,
 				LTTNG_UST_CALLER_IP());
-		})
+		});
 	URCU_TLS(malloc_nesting)--;
 	return retval;
 }
@@ -468,12 +489,12 @@ int posix_memalign(void **memptr, size_t alignment, size_t size)
 		}
 	}
 	TRACEPOINT_NO_NESTING(
-		retval = cur_alloc.posix_memalign(memptr, alignment, size);,
+		retval = cur_alloc.posix_memalign(memptr, alignment, size),
 		if (URCU_TLS(malloc_nesting) == 1) {
 			tracepoint(lttng_ust_libc, posix_memalign,
 				*memptr, alignment, size,
 				retval, LTTNG_UST_CALLER_IP());
-		})
+		});
 	URCU_TLS(malloc_nesting)--;
 	return retval;
 }
@@ -777,8 +798,8 @@ int accept(int fd, struct sockaddr * addr, socklen_t * addr_len)
 	}
 
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.accept(fd, addr, addr_len);,
-		tracepoint(lttng_ust_libc, accept, fd, addr, addr_len, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.accept(fd, addr, addr_len),
+		tracepoint(lttng_ust_libc, accept, fd, addr, addr_len, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -795,8 +816,8 @@ int accept4(int fd, struct sockaddr * addr, socklen_t * addr_len, int flags)
 	}
 
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.accept4(fd, addr, addr_len, flags);,
-		tracepoint(lttng_ust_libc, accept4, fd, addr, addr_len, flags, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.accept4(fd, addr, addr_len, flags),
+		tracepoint(lttng_ust_libc, accept4, fd, addr, addr_len, flags, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -813,8 +834,8 @@ int close(int fd)
 	}
 
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.close(fd);,
-		tracepoint(lttng_ust_libc, close, fd, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.close(fd),
+		tracepoint(lttng_ust_libc, close, fd, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -838,8 +859,8 @@ int open(const char * path, int oflag, ...)
 		va_end(arg);
 	}
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.open(path, oflag, mode);,
-		tracepoint(lttng_ust_libc, open, path, oflag, mode, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.open(path, oflag, mode),
+		tracepoint(lttng_ust_libc, open, path, oflag, mode, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -863,8 +884,8 @@ int open64(const char * path, int oflag, ...)
 		va_end(arg);
 	}
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.open64(path, oflag, mode);,
-		tracepoint(lttng_ust_libc, open64, path, oflag, mode, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.open64(path, oflag, mode),
+		tracepoint(lttng_ust_libc, open64, path, oflag, mode, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -888,8 +909,8 @@ int openat(int fd, const char * path, int oflag, ...)
 		va_end(arg);
 	}
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.openat(fd, path, oflag, mode);,
-		tracepoint(lttng_ust_libc, openat, fd, path, oflag, mode, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.openat(fd, path, oflag, mode),
+		tracepoint(lttng_ust_libc, openat, fd, path, oflag, mode, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -913,8 +934,8 @@ int openat64(int fd, const char * path, int oflag, ...)
 		va_end(arg);
 	}
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.openat64(fd, path, oflag, mode);,
-		tracepoint(lttng_ust_libc, openat64, fd, path, oflag, mode, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.openat64(fd, path, oflag, mode),
+		tracepoint(lttng_ust_libc, openat64, fd, path, oflag, mode, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -931,8 +952,8 @@ FILE * fopen(const char * filename, const char * mode)
 	}
 
 	TRACEPOINT_NO_NESTING(
-		ret = cur_syscall.fopen(filename, mode);,
-		tracepoint(lttng_ust_libc, fopen, filename, mode, ret, LTTNG_UST_CALLER_IP());)
+		ret = cur_syscall.fopen(filename, mode),
+		tracepoint(lttng_ust_libc, fopen, filename, mode, ret, LTTNG_UST_CALLER_IP()));
 	return ret;
 }
 
@@ -949,8 +970,8 @@ int poll(struct pollfd * fds, nfds_t nfds, int timeout)
 	}
 
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.poll(fds, nfds, timeout);,
-		tracepoint(lttng_ust_libc, poll, fds, nfds, timeout, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.poll(fds, nfds, timeout),
+		tracepoint(lttng_ust_libc, poll, fds, nfds, timeout, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -967,8 +988,8 @@ int ppoll(struct pollfd * fds, nfds_t nfds, const struct timespec * tmo_p, const
 	}
 
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.ppoll(fds, nfds, tmo_p, sigmask);,
-		tracepoint(lttng_ust_libc, ppoll, fds, nfds, tmo_p, sigmask, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.ppoll(fds, nfds, tmo_p, sigmask),
+		tracepoint(lttng_ust_libc, ppoll, fds, nfds, tmo_p, sigmask, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -985,8 +1006,8 @@ ssize_t read(int fd, void * buf, size_t count)
 	}
 
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.read(fd, buf, count);,
-		tracepoint(lttng_ust_libc, read, fd, buf, count, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.read(fd, buf, count),
+		tracepoint(lttng_ust_libc, read, fd, buf, count, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -1003,8 +1024,8 @@ ssize_t pread(int fd, void * buf, size_t count, off_t offset)
 	}
 
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.pread(fd, buf, count, offset);,
-		tracepoint(lttng_ust_libc, pread, fd, buf, count, offset, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.pread(fd, buf, count, offset),
+		tracepoint(lttng_ust_libc, pread, fd, buf, count, offset, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -1021,8 +1042,8 @@ ssize_t pread64(int fd, void * buf, size_t count, off_t offset)
 	}
 
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.pread64(fd, buf, count, offset);,
-		tracepoint(lttng_ust_libc, pread64, fd, buf, count, offset, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.pread64(fd, buf, count, offset),
+		tracepoint(lttng_ust_libc, pread64, fd, buf, count, offset, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -1039,8 +1060,8 @@ ssize_t readv(int fd, const struct iovec * iov, int iovcnt)
 	}
 
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.readv(fd, iov, iovcnt);,
-		tracepoint(lttng_ust_libc, readv, fd, iov, iovcnt, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.readv(fd, iov, iovcnt),
+		tracepoint(lttng_ust_libc, readv, fd, iov, iovcnt, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -1057,8 +1078,8 @@ ssize_t preadv(int fd, const struct iovec * iov, int iovcnt, off_t offset)
 	}
 
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.preadv(fd, iov, iovcnt, offset);,
-		tracepoint(lttng_ust_libc, preadv, fd, iov, iovcnt, offset, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.preadv(fd, iov, iovcnt, offset),
+		tracepoint(lttng_ust_libc, preadv, fd, iov, iovcnt, offset, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -1075,8 +1096,8 @@ ssize_t preadv64(int fd, const struct iovec * iov, int iovcnt, off_t offset)
 	}
 
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.preadv64(fd, iov, iovcnt, offset);,
-		tracepoint(lttng_ust_libc, preadv64, fd, iov, iovcnt, offset, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.preadv64(fd, iov, iovcnt, offset),
+		tracepoint(lttng_ust_libc, preadv64, fd, iov, iovcnt, offset, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -1093,8 +1114,8 @@ int select(int nfds, fd_set * readfds, fd_set * writefds, fd_set * exceptfds, st
 	}
 
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.select(nfds, readfds, writefds, exceptfds, timeout);,
-		tracepoint(lttng_ust_libc, select, nfds, readfds, writefds, exceptfds, timeout, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.select(nfds, readfds, writefds, exceptfds, timeout),
+		tracepoint(lttng_ust_libc, select, nfds, readfds, writefds, exceptfds, timeout, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -1111,8 +1132,8 @@ int pselect(int nfds, fd_set * readfds, fd_set * writefds, fd_set * exceptfds, c
 	}
 
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.pselect(nfds, readfds, writefds, exceptfds, timeout, sigmask);,
-		tracepoint(lttng_ust_libc, pselect, nfds, readfds, writefds, exceptfds, timeout, sigmask, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.pselect(nfds, readfds, writefds, exceptfds, timeout, sigmask),
+		tracepoint(lttng_ust_libc, pselect, nfds, readfds, writefds, exceptfds, timeout, sigmask, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -1129,8 +1150,8 @@ ssize_t write(int fd, const void * buf, size_t count)
 	}
 
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.write(fd, buf, count);,
-		tracepoint(lttng_ust_libc, write, fd, buf, count, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.write(fd, buf, count),
+		tracepoint(lttng_ust_libc, write, fd, buf, count, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -1147,8 +1168,8 @@ ssize_t pwrite(int fd, const void * buf, size_t count, off_t offset)
 	}
 
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.pwrite(fd, buf, count, offset);,
-		tracepoint(lttng_ust_libc, pwrite, fd, buf, count, offset, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.pwrite(fd, buf, count, offset),
+		tracepoint(lttng_ust_libc, pwrite, fd, buf, count, offset, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -1165,8 +1186,8 @@ ssize_t pwrite64(int fd, const void * buf, size_t count, off_t offset)
 	}
 
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.pwrite64(fd, buf, count, offset);,
-		tracepoint(lttng_ust_libc, pwrite64, fd, buf, count, offset, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.pwrite64(fd, buf, count, offset),
+		tracepoint(lttng_ust_libc, pwrite64, fd, buf, count, offset, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -1183,8 +1204,8 @@ ssize_t writev(int fd, const struct iovec * iov, int iovcnt)
 	}
 
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.writev(fd, iov, iovcnt);,
-		tracepoint(lttng_ust_libc, writev, fd, iov, iovcnt, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.writev(fd, iov, iovcnt),
+		tracepoint(lttng_ust_libc, writev, fd, iov, iovcnt, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -1201,8 +1222,8 @@ ssize_t pwritev(int fd, const struct iovec * iov, int iovcnt, off_t offset)
 	}
 
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.pwritev(fd, iov, iovcnt, offset);,
-		tracepoint(lttng_ust_libc, pwritev, fd, iov, iovcnt, offset, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.pwritev(fd, iov, iovcnt, offset),
+		tracepoint(lttng_ust_libc, pwritev, fd, iov, iovcnt, offset, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -1219,8 +1240,8 @@ ssize_t pwritev64(int fd, const struct iovec * iov, int iovcnt, off_t offset)
 	}
 
 	TRACEPOINT_NO_NESTING(
-		retval = cur_syscall.pwritev64(fd, iov, iovcnt, offset);,
-		tracepoint(lttng_ust_libc, pwritev64, fd, iov, iovcnt, offset, retval, LTTNG_UST_CALLER_IP());)
+		retval = cur_syscall.pwritev64(fd, iov, iovcnt, offset),
+		tracepoint(lttng_ust_libc, pwritev64, fd, iov, iovcnt, offset, retval, LTTNG_UST_CALLER_IP()));
 	return retval;
 }
 
@@ -1243,4 +1264,46 @@ void lttng_ust_libc_wrapper_init(void)
 	 * multithreaded.
 	 */
 	lookup_all_syscall_symbols();
+}
+
+int pthread_mutex_lock(pthread_mutex_t *mutex)
+{
+	static int (*mutex_lock)(pthread_mutex_t *);
+	int retval;
+
+	if (!mutex_lock) {
+		mutex_lock = dlsym(RTLD_NEXT, "pthread_mutex_lock");
+		if (!mutex_lock) {
+			fprintf(stderr, "unable to initialize pthread wrapper library.\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING_(
+		tracepoint(lttng_ust_libc, pthread_mutex_lock_req, mutex, LTTNG_UST_CALLER_IP()),
+		retval = mutex_lock(mutex),
+		tracepoint(lttng_ust_libc, pthread_mutex_lock_acq, mutex, retval,
+			LTTNG_UST_CALLER_IP()));
+	return retval;
+}
+
+int pthread_cond_wait(pthread_cond_t * __restrict cond, pthread_mutex_t * __restrict mutex)
+{
+	static int (*cond_wait)(pthread_cond_t * __restrict cond, pthread_mutex_t * __restrict mutex);
+	int retval;
+
+	if (!cond_wait) {
+		cond_wait = dlsym(RTLD_NEXT, "pthread_cond_wait");
+		if (!cond_wait) {
+			fprintf(stderr, "unable to initialize pthread wrapper library.\n");
+			abort();
+		}
+	}
+
+	TRACEPOINT_NO_NESTING_(
+		tracepoint(lttng_ust_libc, pthread_cond_wait_req, cond, mutex, LTTNG_UST_CALLER_IP()),
+		retval = cond_wait(cond, mutex),
+		tracepoint(lttng_ust_libc, pthread_cond_wait_acq, cond, mutex, retval,
+			LTTNG_UST_CALLER_IP()));
+	return retval;
 }

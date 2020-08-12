@@ -341,6 +341,38 @@ TRACEPOINT_EVENT(lttng_ust_libc, pwritev64,
 	)
 )
 
+TRACEPOINT_EVENT(lttng_ust_libc, pthread_mutex_lock_req,
+	TP_ARGS(pthread_mutex_t *, mutex, void *, ip),
+	TP_FIELDS(
+		ctf_integer_hex(void *, mutex, mutex)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, pthread_mutex_lock_acq,
+	TP_ARGS(pthread_mutex_t *, mutex, int, status, void *, ip),
+	TP_FIELDS(
+		ctf_integer_hex(void *, mutex, mutex)
+		ctf_integer(int, status, status)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, pthread_cond_wait_req,
+	TP_ARGS(pthread_cond_t *, cond, pthread_mutex_t *, mutex, void *, ip),
+	TP_FIELDS(
+		ctf_integer_hex(void *, cond, cond)
+		ctf_integer_hex(void *, mutex, mutex)
+	)
+)
+
+TRACEPOINT_EVENT(lttng_ust_libc, pthread_cond_wait_acq,
+	TP_ARGS(pthread_cond_t *, cond, pthread_mutex_t *, mutex, int, status, void *, ip),
+	TP_FIELDS(
+		ctf_integer_hex(void *, cond, cond)
+		ctf_integer_hex(void *, mutex, mutex)
+		ctf_integer(int, status, status)
+	)
+)
+
 #endif /* _TRACEPOINT_UST_LIBC_H */
 
 #undef TRACEPOINT_INCLUDE

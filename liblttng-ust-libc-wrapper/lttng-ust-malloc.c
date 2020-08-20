@@ -684,6 +684,7 @@ struct syscall_functions {
 	ssize_t (*writev)(int fd, const struct iovec * iov, int iovcnt);
 	ssize_t (*pwritev)(int fd, const struct iovec * iov, int iovcnt, off_t offset);
 	ssize_t (*pwritev64)(int fd, const struct iovec * iov, int iovcnt, off_t offset);
+	// int (*pthread_cond_wait)(pthread_cond_t * cond, pthread_mutex_t * mutex);
 };
 
 static
@@ -740,6 +741,7 @@ void setup_static_sycalls(void)
 	cur_syscall.pwritev = static_pwritev;
 	assert(NULL == cur_syscall.pwritev64);
 	cur_syscall.pwritev64 = static_pwritev64;
+	// assert(NULL == cur_syscall.pthread_cond_wait);
 }
 
 static
@@ -779,6 +781,7 @@ void lookup_all_syscall_symbols(void)
 	sf.writev = dlsym(RTLD_NEXT, "writev");
 	sf.pwritev = dlsym(RTLD_NEXT, "pwritev");
 	sf.pwritev64 = dlsym(RTLD_NEXT, "pwritev64");
+	// sf.pthread_cond_wait = dlsym(RTLD_NEXT, "pthread_cond_wait");
 
 	/* Populate the new allocator functions */
 	memcpy(&cur_syscall, &sf, sizeof(cur_syscall));
@@ -1287,23 +1290,22 @@ int pthread_mutex_lock(pthread_mutex_t *mutex)
 	return retval;
 }
 
-int pthread_cond_wait(pthread_cond_t * __restrict cond, pthread_mutex_t * __restrict mutex)
-{
-	static int (*cond_wait)(pthread_cond_t * __restrict cond, pthread_mutex_t * __restrict mutex);
-	int retval;
+// int pthread_cond_wait(pthread_cond_t * cond, pthread_mutex_t * mutex)
+// {
+// 	int retval;
 
-	if (!cond_wait) {
-		cond_wait = dlsym(RTLD_NEXT, "pthread_cond_wait");
-		if (!cond_wait) {
-			fprintf(stderr, "unable to initialize pthread wrapper library.\n");
-			abort();
-		}
-	}
+// 	if (NULL == cur_syscall.pthread_cond_wait) {
+// 		lookup_all_syscall_symbols();
+// 		if (NULL == cur_syscall.pthread_cond_wait) {
+// 			fprintf(stderr, "unable to initialize pthread wrapper library.\n");
+// 			abort();
+// 		}
+// 	}
 
-	TRACEPOINT_NO_NESTING_(
-		tracepoint(lttng_ust_libc, pthread_cond_wait_req, cond, mutex, LTTNG_UST_CALLER_IP()),
-		retval = cond_wait(cond, mutex),
-		tracepoint(lttng_ust_libc, pthread_cond_wait_acq, cond, mutex, retval,
-			LTTNG_UST_CALLER_IP()));
-	return retval;
-}
+// 	TRACEPOINT_NO_NESTING_(
+// 		tracepoint(lttng_ust_libc, pthread_cond_wait_req, cond, mutex, LTTNG_UST_CALLER_IP()),
+// 		retval = cur_syscall.pthread_cond_wait(cond, mutex),
+// 		tracepoint(lttng_ust_libc, pthread_cond_wait_acq, cond, mutex, retval,
+// 			LTTNG_UST_CALLER_IP()));
+// 	return retval;
+// }

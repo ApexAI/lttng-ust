@@ -61,7 +61,7 @@ void nesting_guard_reset_thread_in_trace()
 	retval = func_call; \
 	tracepoint_after; \
 	nesting_guard_reset_thread_in_trace()
-
+#if 0
 int pthread_mutex_lock(pthread_mutex_t *mutex)
 {
 	static int (*mutex_lock)(pthread_mutex_t *);
@@ -156,3 +156,4 @@ int pthread_cond_wait(pthread_cond_t * __restrict cond, pthread_mutex_t * __rest
 			LTTNG_UST_CALLER_IP()));
 	return retval;
 }
+#endif

@@ -123,6 +123,49 @@ static int lttng_ust_comm_should_quit;
 int lttng_ust_loaded __attribute__((weak));
 
 /*
+ * During stack unwinding in libunwind, it uses `dl_iterate_phdr` to iterate through the
+ * loaded shared objects. When mutiple threads are working on stack unwinding, there a dead
+ * lock caused due to the usage of dl_iterate_phdr. To avoid this, ust_stack_unwind_mutex
+ * lock is used to sychornize the usage of functions which internally calls dl_iterate_phdr
+ */
+static pthread_mutex_t ust_stack_unwind_mutex;
+static pthread_mutexattr_t ust_stack_unwind_mutex_attr;
+static int is_stack_unwind_mutex_init = 0;
+
+int stack_unwind_mutex_init() {
+  int res = -1;
+  if (0 == (uatomic_cmpxchg(&is_stack_unwind_mutex_init, 0, 1))) {
+    if ((res = pthread_mutexattr_init(&ust_stack_unwind_mutex_attr)) == 0) {
+      if ((res = pthread_mutexattr_settype(&ust_stack_unwind_mutex_attr, PTHREAD_MUTEX_ERRORCHECK)) == 0) {
+        res = pthread_mutex_init(&ust_stack_unwind_mutex, &ust_stack_unwind_mutex_attr);
+      }
+    }
+  }
+  if (res > 0) {
+    printf("\n Error during the intialization of ust stack unwind lock\n");
+    return res;
+  } else {
+    return 0;
+  }
+}
+
+int ust_stack_unwind_lock()
+{
+  int res = 0;
+  res = stack_unwind_mutex_init();
+  if  (0 != res) {
+    return -1;
+  }
+  res = pthread_mutex_lock(&ust_stack_unwind_mutex);
+  return res;
+}
+
+void ust_stack_unwind_unlock()
+{
+  pthread_mutex_unlock(&ust_stack_unwind_mutex);
+}
+
+/*
  * Return 0 on success, -1 if should quit.
  * The lock is taken in both cases.
  * Signal-safe.

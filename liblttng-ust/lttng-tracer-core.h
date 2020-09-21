@@ -23,6 +23,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <sys/types.h>
 #include <urcu/arch.h>
 #include <urcu/list.h>
 #include <lttng/ust-tracer.h>
@@ -36,6 +37,9 @@ struct lttng_event;
 struct lttng_ctx_field;
 struct lttng_ust_lib_ring_buffer_ctx;
 struct lttng_ctx_value;
+
+int ust_stack_unwind_lock(void) __attribute__ ((warn_unused_result));
+void ust_stack_unwind_unlock(void);
 
 int ust_lock(void) __attribute__ ((warn_unused_result));
 void ust_lock_nocheck(void);

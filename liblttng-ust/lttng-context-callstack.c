@@ -21,7 +21,6 @@
  */
 
 #define _LGPL_SOURCE
-#include <sys/types.h>
 #include <unistd.h>
 #include <lttng/ust-events.h>
 #include <lttng/ust-tracer.h>
@@ -36,16 +35,20 @@
 #define CONTEXT_NAME "callstack_user"
 #define MAX_ENTRIES 128
 
-
 static size_t unwind_stack(void** stack, size_t maxsize)
 {
 	unw_context_t unwind_context;
 	unw_getcontext(&unwind_context);
 
   unw_cursor_t unwind_cursor;
+  int lock_res = ust_stack_unwind_lock();
   int ret = unw_init_local(&unwind_cursor, &unwind_context);
-  if (ret != 0)
+  if (ret != 0) {
+    if (0 == lock_res) {
+      ust_stack_unwind_unlock();
+    }
     return 0;
+  }
 
   size_t i;
   for (i = 0; i < maxsize; ++i)
@@ -58,7 +61,9 @@ static size_t unwind_stack(void** stack, size_t maxsize)
     if (unw_step(&unwind_cursor) <= 0)
       break;
   }
-
+  if (0 == lock_res) {
+    ust_stack_unwind_unlock();
+  }
   return i;
 }
 

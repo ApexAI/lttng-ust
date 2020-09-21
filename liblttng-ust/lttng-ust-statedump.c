@@ -588,7 +588,14 @@ int do_baddr_statedump(void *owner)
 {
 	if (lttng_getenv("LTTNG_UST_WITHOUT_BADDR_STATEDUMP"))
 		return 0;
+  int res =  ust_stack_unwind_lock();
+  if (0 != res) {
+    printf("\n Error locking mutex while generating statedump: %d\n", res);
+  }
 	lttng_ust_dl_update(LTTNG_UST_CALLER_IP());
+  if (0 == res) {
+    ust_stack_unwind_unlock();
+  }
 	ust_dl_table_statedump(owner);
 	return 0;
 }
